@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_ID: str
     GOOGLE_CLIENT_SECRET: str
 
+    REDIS_URL: str
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 settings = Settings()
