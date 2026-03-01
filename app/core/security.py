@@ -1,8 +1,16 @@
 import jwt
 from datetime import datetime, timedelta, timezone
 import httpx
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from app.core.config import settings
+from app.api.dependencies import get_db
+from app.models.domain import User
+
+security = HTTPBearer()
 
 ALGORITHM = "HS256"
 
@@ -56,3 +64,30 @@ async def verify_google_token(token: str) -> dict | None:
             "email": token_data.get("email"),
             "name": token_data.get("name")
         }
+
+
+async def get_current_user(
+        credentials: HTTPAuthorizationCredentials = Depends(security),
+        db: AsyncSession = Depends(get_db)
+) -> User:
+    
+    token = credentials.credentials
+    user_id = verify_access_token(token)
+
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or Expired Access Token",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+    
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalars().first()
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    return user
