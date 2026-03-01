@@ -5,6 +5,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm import joinedload
 
 from app.core.config import settings
 from app.api.dependencies import get_db
@@ -14,15 +15,18 @@ security = HTTPBearer()
 
 ALGORITHM = "HS256"
 
-ACCESS_TOKEN_EXPIRES_MINUTES = 60 * 24 * 7
+ACCESS_TOKEN_EXPIRES_MINUTES = 60 * 24
 
 
-def generate_access_token(data: dict) -> str:
-    to_encode = data.copy()
-
+def generate_access_token(user_id: str, organisation_id: str, role: str) -> str:
     expires_in = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRES_MINUTES)
 
-    to_encode.update({"exp": expires_in})
+    to_encode = {
+        "user_id": user_id,
+        "organisation_id": organisation_id,
+        "role": role,
+        "exp": expires_in
+    }
 
     encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=ALGORITHM)
     
@@ -33,7 +37,7 @@ def verify_access_token(token: str) -> str | None:
     try:
         payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[ALGORITHM])
 
-        user_id: str = payload.get("sub")
+        user_id: str = payload.get("user_id")
 
         if user_id is None:
             return None
@@ -81,7 +85,9 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"}
         )
     
-    result = await db.execute(select(User).where(User.id == user_id))
+    result = await db.execute(
+        select(User).options(joinedload(User.organisation)).where(User.id == user_id)
+    )
     user = result.scalars().first()
 
     if not user:

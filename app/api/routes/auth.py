@@ -1,51 +1,101 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
 from sqlalchemy import select
-from pydantic import BaseModel
+import httpx
 
 from app.api.dependencies import get_db
+from app.core.config import settings
 from app.core.security import verify_google_token, generate_access_token
 from app.models.domain import User, Organisation
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
-class GoogleAuthRequest(BaseModel):
-    token: str
+REDIRECT_URI = "http://localhost:8000/api/v1/auth/callback"
 
 
-@router.post("/google")
-async def authenticate_google(request: GoogleAuthRequest, db: AsyncSession = Depends(get_db)):
-    google_data = await verify_google_token(request.token)
-    if not google_data:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or Expired Google Token"
-        )
+@router.get("/google")
+async def login_google():
+    url = (
+        f"https://accounts.google.com/o/oauth2/v2/auth?"
+        f"response_type=code&"
+        f"client_id={settings.GOOGLE_CLIENT_ID}&"
+        f"redirect_uri={REDIRECT_URI}&"
+        f"scope=openid%20email%20profile&"
+        f"access_type=offline"
+    )
+    return RedirectResponse(url=url)
+
+
+@router.get("/callback")
+async def auth_callback(code: str, db: AsyncSession = Depends(get_db)):
+    token_url = "https://oauth2.googleapis.com/token"
+    data = {
+        "code": code,
+        "client_id": settings.GOOGLE_CLIENT_ID,
+        "client_secret": settings.GOOGLE_CLIENT_SECRET,
+        "redirect_uri": REDIRECT_URI,
+        "grant_type": "authorization_code"
+    }
+
+    async with httpx.AsyncClient() as client:
+        response = await client.post(token_url, data=data)
+        if response.status_code != 200:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Google authentication failed. Invalid authorization code."
+            )
+        
+        token_data = response.json()
+        id_token = token_data.get("id_token")
+
+        google_data = await verify_google_token(id_token)
+        if not google_data:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired Google ID Token."
+            )
     
-    result = await db.execute(select(User).where(User.email == google_data["email"]))
+    email = google_data["email"]
+    full_domain = email.split('@')[1]
+    company_name = full_domain.split(".")[0].capitalize()
+
+    result = await db.execute(select(User).options(joinedload(User.organisation)).where(User.email == email))
     user = result.scalars().first()
 
     if not user:
-        new_org = Organisation(
-            name=f"{google_data['name']}'s Workspace",
-            slug=f"{google_data['email'].split('@')[0]}-workspace"
-        )
-        db.add(new_org)
-        await db.flush()
+        org_result = await db.execute(select(Organisation).where(Organisation.slug == full_domain))
+        org = org_result.scalars().first()
 
+        if not org:
+            org = Organisation(
+                name=f"{company_name.capitalize()} Workspace",
+                slug=full_domain
+            )
+            db.add(org)
+            await db.flush()
+            role = "admin"
+        else:
+            role = "member"
+        
         user = User(
-            email=google_data["email"],
+            email=email,
             name=google_data["name"],
             google_id=google_data["google_id"],
-            organisation_id=new_org.id,
-            role="admin"
+            organisation_id=org.id,
+            role=role
         )
         db.add(user)
         await db.commit()
         await db.refresh(user)
 
-    access_token = generate_access_token(data={"sub": str(user.id)})
-
+    access_token = generate_access_token(
+        user_id=str(user.id),
+        organisation_id=str(user.organisation.id),
+        role=user.role
+    )
+    
     return {
         "access_token": access_token,
         "token_type": "bearer",
@@ -53,7 +103,8 @@ async def authenticate_google(request: GoogleAuthRequest, db: AsyncSession = Dep
             "id": str(user.id),
             "email": user.email,
             "name": user.name,
-            "organisation_id": str(user.organisation_id),
-            "role": user.role
+            "role": user.role,
+            "organisation_id": user.organisation_id,
+            "organisation_name": user.organisation.name
         }
     }

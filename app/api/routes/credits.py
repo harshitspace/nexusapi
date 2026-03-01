@@ -6,6 +6,7 @@ from app.api.dependencies import get_db
 from app.core.security import get_current_user
 from app.models.domain import User, CreditTransaction
 from app.schemas.credit import CreditDeductRequest, CreditBalanceResponse, CreditGrantRequest
+from app.services.credit import deduct_credits, InsufficientCreditsError
 
 router = APIRouter(prefix="/credits", tags=["Credits"])
 
@@ -15,67 +16,49 @@ async def get_balance(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    query = select(func.coalesce(func.sum(CreditTransaction.amount), 0)).where(
-        CreditTransaction.organisation_id == current_user.organisation_id
-    )
-    result = await db.execute(query)
-    current_balance = result.scalar()
-
-    return CreditBalanceResponse(
-        organisation_id=current_user.organisation_id,
-        balance=current_balance
-    )
-
-
-@router.post("/deduct")
-async def deduct_credits(
-    request: CreditDeductRequest,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
-):
-    idempotent_query = select(CreditTransaction).where(
-        CreditTransaction.idempotency_key == request.idempotency_key,
-        CreditTransaction.organisation_id == current_user.organisation_id
-    )
-    idempotent_result = await db.execute(idempotent_query)
-    existing_transactions = idempotent_result.scalars().first()
-
-    if existing_transactions:
-        return {
-            "message": "Request already processesd",
-            "transaction_id": str(existing_transactions.id),
-            "status": "idempotent_success"
-        }
-    
     balance_query = select(func.coalesce(func.sum(CreditTransaction.amount), 0)).where(
         CreditTransaction.organisation_id == current_user.organisation_id
     )
     balance_result = await db.execute(balance_query)
     current_balance = balance_result.scalar()
 
-    if current_balance < request.amount:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Insufficient credits! You have {current_balance}, but tried to use {request.amount}."
-        )
-    
-    new_transaction = CreditTransaction(
+    transaction_query = select(CreditTransaction).where(
+        CreditTransaction.organisation_id == current_user.organisation_id
+    ).order_by(CreditTransaction.created_at.desc()).limit(10)
+    transaction_result = await db.execute(transaction_query)
+    recent_transactions = transaction_result.scalars().all()
+
+    return CreditBalanceResponse(
         organisation_id=current_user.organisation_id,
-        user_id=current_user.id,
-        amount=-request.amount,
-        reason=request.reason,
-        idempotency_key=request.idempotency_key
+        balance=current_balance,
+        recent_transactions=recent_transactions
     )
 
-    db.add(new_transaction)
-    await db.commit()
-    await db.refresh(new_transaction)
 
-    return {
-        "message": "Credits deducted successfully!",
-        "transaction_id": str(new_transaction.id),
-        "remaining_balance": current_balance - request.amount
-    }
+@router.post("/deduct")
+async def deduct_credits_route(
+    request: CreditDeductRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    try:
+        transaction = await deduct_credits(
+            db=db,
+            org_id=current_user.organisation_id,
+            user_id=current_user.id,
+            amount=request.amount,
+            reason=request.reason,
+            idempotency_key=request.idempotency_key
+        )
+        return {
+            "message": "Credits deducted successfully!",
+            "transaction_id": str(transaction.id)
+        }
+    except InsufficientCreditsError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
 
 
 @router.post("/grant")
