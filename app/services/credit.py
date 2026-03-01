@@ -4,7 +4,9 @@ from sqlalchemy import select, func
 from app.models.domain import CreditTransaction
 
 class InsufficientCreditsError(Exception):
-    pass
+    def __init__(self, message: str, current_balance: int):
+        super().__init__(message)
+        self.current_balance = current_balance
 
 async def deduct_credits(
         db: AsyncSession,
@@ -34,7 +36,8 @@ async def deduct_credits(
 
     if current_balance < amount:
         raise InsufficientCreditsError(
-            f"Insufficient credits. You have {current_balance}, but tried to use {amount}."
+            f"Insufficient credits. You have {current_balance}, but tried to use {amount}.",
+            current_balance=current_balance
         )
     
     new_transaction = CreditTransaction(
