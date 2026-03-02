@@ -13,13 +13,9 @@ from app.models.domain import User
 
 security = HTTPBearer()
 
-ALGORITHM = "HS256"
-
-ACCESS_TOKEN_EXPIRES_MINUTES = 60 * 24
-
 
 def generate_access_token(user_id: str, organisation_id: str, role: str) -> str:
-    expires_in = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRES_MINUTES)
+    expires_in = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRES_MINUTES)
 
     to_encode = {
         "user_id": user_id,
@@ -28,14 +24,14 @@ def generate_access_token(user_id: str, organisation_id: str, role: str) -> str:
         "exp": expires_in
     }
 
-    encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=ALGORITHM)
+    encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.ALGORITHM)
     
     return encoded_jwt
 
 
 def verify_access_token(token: str) -> str | None:
     try:
-        payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.ALGORITHM])
 
         user_id: str = payload.get("user_id")
 

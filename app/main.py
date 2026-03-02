@@ -1,4 +1,7 @@
+import jwt
 import uuid
+import time
+import structlog
 from fastapi import FastAPI, HTTPException, status, Request
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
@@ -6,6 +9,8 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from sqlalchemy import text
 
 from app.db.session import engine
+from app.core.config import settings
+from app.core.security import verify_access_token
 from app.api.routes import auth, credits, users, products
 
 app = FastAPI(title="NexusAPI")
@@ -15,11 +20,51 @@ app.include_router(credits.router, prefix="/api/v1")
 app.include_router(users.router)
 app.include_router(products.router)
 
+
+structlog.configure(
+    processors=[
+        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.processors.JSONRenderer()
+    ]
+)
+logger = structlog.get_logger()
+
+
 @app.middleware("http")
-async def request_id_middleware(request: Request, call_next):
+async def structured_logging_middleware(request: Request, call_next):
     request_id = str(uuid.uuid4())
     request.state.request_id = request_id
+
+    start_time = time.time()
+
     response = await call_next(request)
+    
+    duration_ms = round((time.time() - start_time) * 1000, 2)
+
+    user_id = None
+    org_id = None
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header.split(" ")[1]
+        try:
+            payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.ALGORITHM])
+            user_id = payload.get("user_id")
+            org_id = payload.get("organisation_id")
+        except:
+            pass
+    
+    logger.info(
+        "api_request",
+        timestamp=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        method=request.method,
+        path=request.url.path,
+        organisation_id=org_id,
+        user_id=user_id,
+        response_status=response.status_code,
+        duration_ms=duration_ms,
+        request_id=request_id
+    )
+
     return response
 
 

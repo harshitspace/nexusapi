@@ -10,6 +10,7 @@ from arq.connections import RedisSettings
 from arq.jobs import Job
 
 from app.api.dependencies import get_db
+from app.api.middleware import check_rate_limit
 from app.core.security import get_current_user
 from app.core.config import settings
 from app.models.domain import User, CreditTransaction
@@ -19,7 +20,7 @@ from app.services.credit import deduct_credits, InsufficientCreditsError
 router = APIRouter(prefix="/api", tags=["Products"])
 
 
-@router.post("/analyse")
+@router.post("/analyse", dependencies=[Depends(check_rate_limit)])
 async def analyse_text(
     payload: AnalyseRequest,
     idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
@@ -63,7 +64,7 @@ async def analyse_text(
     }
 
 
-@router.post("/summarise")
+@router.post("/summarise", dependencies=[Depends(check_rate_limit)])
 async def summarise_text_async(
     payload: SummariseRequest,
     idempotency_key: str | None =  Header(None, alias="Idempotency-Key"),

@@ -4,6 +4,8 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "NexusAPI"
     DATABASE_URL: str
     
+    ALGORITHM: str
+    ACCESS_TOKEN_EXPIRES_MINUTES: int
     JWT_SECRET_KEY: str
 
     GOOGLE_CLIENT_ID: str
