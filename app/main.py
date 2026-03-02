@@ -15,10 +15,10 @@ from app.api.routes import auth, credits, users, products
 
 app = FastAPI(title="NexusAPI")
 
-app.include_router(auth.router, prefix="/api/v1")
-app.include_router(credits.router, prefix="/api/v1")
+app.include_router(auth.router, prefix="/auth")
+app.include_router(credits.router, prefix="/credits")
 app.include_router(users.router)
-app.include_router(products.router)
+app.include_router(products.router, prefix="/api")
 
 
 structlog.configure(

@@ -8,7 +8,7 @@ from app.models.domain import User, CreditTransaction
 from app.schemas.credit import CreditDeductRequest, CreditBalanceResponse, CreditGrantRequest
 from app.services.credit import deduct_credits, InsufficientCreditsError
 
-router = APIRouter(prefix="/credits", tags=["Credits"])
+router = APIRouter(tags=["Credits"])
 
 
 @router.get("/balance", response_model=CreditBalanceResponse)

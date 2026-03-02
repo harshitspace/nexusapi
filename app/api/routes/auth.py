@@ -10,9 +10,9 @@ from app.core.config import settings
 from app.core.security import verify_google_token, generate_access_token
 from app.models.domain import User, Organisation
 
-router = APIRouter(prefix="/auth", tags=["Authentication"])
+router = APIRouter(tags=["Authentication"])
 
-REDIRECT_URI = "http://localhost:8000/api/v1/auth/callback"
+REDIRECT_URI = settings.GOOGLE_REDIRECT_URI
 
 
 @router.get("/google")

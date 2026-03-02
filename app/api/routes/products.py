@@ -17,7 +17,7 @@ from app.models.domain import User, CreditTransaction
 from app.schemas.product import AnalyseRequest, SummariseRequest
 from app.services.credit import deduct_credits, InsufficientCreditsError
 
-router = APIRouter(prefix="/api", tags=["Products"])
+router = APIRouter(tags=["Products"])
 
 
 @router.post("/analyse", dependencies=[Depends(check_rate_limit)])
